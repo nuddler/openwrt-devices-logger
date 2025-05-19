@@ -3,6 +3,7 @@ include $(TOPDIR)/rules.mk
 PKG_NAME:=luci-app-devices-full
 PKG_VERSION:=1.0
 PKG_LICENSE:=GPL-3.0
+PKG_ARCH:=all
 
 include $(INCLUDE_DIR)/package.mk
 
