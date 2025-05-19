@@ -48,9 +48,12 @@ jobs:
         make package/luci-app-devices-full/compile V=s
       shell: bash
 
+    - name: List built packages
+      run: ls -R sdk/openwrt-sdk-*/bin/packages
+
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
         name: luci-app-devices-full
-        path: sdk/openwrt-sdk-*/bin/packages/*/luci/luci-app-devices-full_*.ipk
+        path: sdk/openwrt-sdk-*/bin/packages/**/*luci-app-devices-full*.ipk
 
