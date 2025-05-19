@@ -24,5 +24,9 @@ define Package/$(PKG_NAME)/install
 	$(INSTALL_DATA) ./files/etc/cron.d/devices-logger $(1)/etc/cron.d/
 endef
 
+define Build/Compile
+endef
+
+
 $(eval $(call BuildPackage,$(PKG_NAME)))
 
