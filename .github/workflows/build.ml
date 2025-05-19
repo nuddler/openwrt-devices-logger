@@ -1,0 +1,56 @@
+name: Build OpenWrt .ipk
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Install host deps
+      run: |
+        sudo apt update
+        sudo apt install -y build-essential git unzip libncurses5-dev \
+          zlib1g-dev gawk gettext libssl-dev xsltproc rsync wget \
+          python3 python3-distutils zstd || true
+
+    - name: Download OpenWrt SDK
+      run: |
+        SDK_URL=https://downloads.openwrt.org/releases/24.10.0/targets/ramips/mt7621/openwrt-sdk-24.10.0-ramips-mt7621_gcc-13.3.0_musl.Linux-x86_64.tar.zst
+        wget -O sdk.tar.zst "$SDK_URL"
+        mkdir sdk && cd sdk
+        tar --use-compress-program=unzstd -xf ../sdk.tar.zst
+        cd ..
+
+    - name: Copy custom package
+      run: |
+        rm -rf sdk/openwrt-sdk-*/package/luci-app-devices-full
+        cp -r package/luci-app-devices-full sdk/openwrt-sdk-*/package/
+      shell: bash
+
+    - name: Compile only our package
+      run: |
+        cd sdk/openwrt-sdk-*
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+        make defconfig
+        # wyłącz inne luci-app
+        sed -i 's/^CONFIG_PACKAGE_luci-app-/# &/' .config
+        sed -i 's/^# CONFIG_PACKAGE_luci-app-devices-full is not set/CONFIG_PACKAGE_luci-app-devices-full=y/' .config
+        make package/luci-app-devices-full/compile V=s
+      shell: bash
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: luci-app-devices-full
+        path: sdk/openwrt-sdk-*/bin/packages/*/luci/luci-app-devices-full_*.ipk
+

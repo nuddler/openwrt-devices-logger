@@ -1,0 +1,24 @@
+<%+header%>
+<h2>Urządzenia sieciowe</h2>
+<table class="table">
+<tr><th>IP</th><th>MAC</th><th>Hostname</th><th>Typ</th></tr>
+<%
+  local leases = luci.sys.exec("cat /tmp/dhcp.leases")
+  local neigh  = luci.sys.exec("ip neigh show br-lan")
+  for ip,mac in neigh:gmatch("([^ ]+) dev br%-lan lladdr ([^ ]+)") do
+    local hostname = leases:match(mac .. ".-%s(.-)%s") or "-"
+    local typ = luci.sys.exec(
+      "iw dev wlan0 station dump | grep -iq " .. mac .. " && echo Wi-Fi || echo LAN"
+    )
+    write(
+      "<tr><td>"..ip..
+      "</td><td>"..mac..
+      "</td><td>"..hostname..
+      "</td><td>"..typ..
+      "</td></tr>"
+    )
+  end
+%>
+</table>
+<%+footer%>
+
