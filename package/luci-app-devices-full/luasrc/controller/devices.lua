@@ -1,73 +1,77 @@
+-- /usr/lib/lua/luci/controller/devices.lua
 module("luci.controller.devices", package.seeall)
 
 function index()
-  entry({"admin", "status", "devices"}, call("action_status"), "Urządzenia sieciowe", 90)
+  entry({"admin", "status", "devices"}, call("action_status"), _("Device Status"), 60)
 end
 
 function action_status()
-  local sys  = require "luci.sys"
-  local tpl  = require "luci.template"
+  local uci = require "luci.model.uci".cursor()
+  local sys = require "luci.sys"
+  local tpl = require "luci.template"
+
+  -- 1) Statyczne hosty z UCI dhcp.@host[]
+  local stat_map = {}
+  uci:foreach("dhcp", "host", function(s)
+    local mac = s.mac
+    if type(mac) == "table" then
+      mac = mac[1]
+    end
+    if mac and s.name then
+      stat_map[string.lower(mac)] = s.name
+    end
+  end)
+
+  -- 2) Dynamiczne dzierżawy z /tmp/dhcp.leases
+  local dyn_map = {}
+  local fh = io.open("/tmp/dhcp.leases", "r")
+  if fh then
+    for line in fh:lines() do
+      local ts, mac, ip, host = line:match("^(%d+)%s+(%S+)%s+(%S+)%s+(%S+)")
+      if mac and host then
+        dyn_map[string.lower(mac)] = host
+      end
+    end
+    fh:close()
+  end
+
+  -- 3) Skan ARP i budowa listy urządzeń
   local data = {}
-
-  -- wczytaj DHCP leases
-  local leases   = sys.exec("cat /tmp/dhcp.leases")
-  -- wczytaj sąsiadów z br-lan
-  local neigh    = sys.exec("ip neigh show dev br-lan")
-
-  -- znajdź interfejsy Wi-Fi i ich SSID
-  local wifi_ifs, wifi_label = {}, {}
-  for iface in sys.exec("iw dev | awk '$1==\"Interface\"{print $2}'"):gmatch("%S+") do
-    table.insert(wifi_ifs, iface)
-    local ssid = sys.exec(
-      "iw dev " .. iface .. " info | grep '\\<ssid\\>' | cut -d ' ' -f2-"
-    ):match("^%s*(.-)%s*$")
-    wifi_label[iface] = (ssid ~= "" and ssid) or iface
-  end
-
-  -- funkcja pomocnicza do znajdowania portu
-  local function find_port(mac, ip)
-    local port_no = sys.exec(
-      "brctl showmacs br-lan 2>/dev/null | grep -i " .. mac .. " | awk '{print $1}'"
-    ):match("%d+")
-    if not port_no then
-      sys.exec("ping -c1 -W1 " .. ip .. " >/dev/null 2>&1")
-      port_no = sys.exec(
-        "brctl showmacs br-lan 2>/dev/null | grep -i " .. mac .. " | awk '{print $1}'"
-      ):match("%d+")
-    end
-    if not port_no then
-      return "-"
-    end
-    local line = sys.exec(
-      "brctl show br-lan | sed -n '2,$p' | awk '{print $NF}' | sed -n " .. port_no .. "p"
-    )
-    return (line:match("%S+") or "-")
-  end
-
-  -- parsuj każdy wiersz z neigh
-  for ln in neigh:gmatch("[^\n]+") do
-    local ip, mac = ln:match("(%d+%.%d+%.%d+%.%d+).*lladdr%s+([0-9a-f:]+)")
+  local arp = io.popen("arp-scan --interface=br-lan --localnet 2>/dev/null")
+  for line in arp:lines() do
+    local ip, mac = line:match("^(%d+%.%d+%.%d+%.%d+)%s+(%S+)")
     if ip and mac then
-      mac = mac:lower()
-      local hostname = leases:match("%S+%s+"..mac.."%s+%S+%s+(%S+)") or "-"
-      local port     = find_port(mac, ip)
-      local typ
+      mac = string.lower(mac)
+      local hostname = dyn_map[mac] or stat_map[mac] or ""
+      local typ  = "lan"
+      local port
 
-      if wifi_label[port] then
-        typ  = wifi_label[port]
-        port = "-"
-      else
-        typ = "LAN"
+      -- a) Wi-Fi (AP only)
+      for ifname in sys.exec("iw dev 2>/dev/null | awk '$1==\"Interface\"{print $2}'")
+                        :gmatch("[^\r\n]+") do
+        local info = sys.exec("iw dev " .. ifname .. " info 2>/dev/null")
+        if info and info:match("type AP") then
+          local dump = sys.exec("iw dev " .. ifname .. " station dump 2>/dev/null") or ""
+          if dump:lower():match("station " .. mac) then
+            local essid = sys.exec(
+              "iwinfo " .. ifname .. " info 2>/dev/null | awk -F'\"' '/ESSID/ {print $2}'"
+            ) or ""
+            typ = essid:match("%S+") or typ
+            break
+          end
+        end
       end
 
-      -- dodatkowa weryfikacja po station dump
-      for _, iface in ipairs(wifi_ifs) do
-        if sys.exec(
-          "iw dev " .. iface .. " station dump | grep -iq " .. mac .. " && echo yes"
-        ):match("yes") then
-          typ  = wifi_label[iface]
-          port = "-"
-          break
+      -- b) Port LAN, jeśli dalej lan
+      if typ == "lan" then
+        local tbl = sys.exec("brctl showmacs br-lan 2>/dev/null")
+        for ln in tbl:gmatch("[^\r\n]+") do
+          local p, m = ln:match("^(%d+)%s+(%S+)")
+          if m and string.lower(m) == mac then
+            port = tonumber(p)
+            typ  = "lan" .. port
+            break
+          end
         end
       end
 
@@ -80,7 +84,8 @@ function action_status()
       })
     end
   end
+  arp:close()
 
-  -- renderujemy z przekazaniem gotowej listy
+  -- 4) Renderujemy szablon z listą urządzeń
   tpl.render("devices/status", { devices = data })
 end
