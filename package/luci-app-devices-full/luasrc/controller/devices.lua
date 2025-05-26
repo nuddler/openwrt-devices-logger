@@ -10,19 +10,17 @@ function action_status()
   local sys = require "luci.sys"
   local tpl = require "luci.template"
 
-  -- 1) Statyczne hosty z UCI dhcp.@host[]
+  -- 1) Statyczne hosty
   local stat_map = {}
   uci:foreach("dhcp", "host", function(s)
     local mac = s.mac
-    if type(mac) == "table" then
-      mac = mac[1]
-    end
+    if type(mac) == "table" then mac = mac[1] end
     if mac and s.name then
       stat_map[string.lower(mac)] = s.name
     end
   end)
 
-  -- 2) Dynamiczne dzierżawy z /tmp/dhcp.leases
+  -- 2) Dynamiczne dzierżawy
   local dyn_map = {}
   local fh = io.open("/tmp/dhcp.leases", "r")
   if fh then
@@ -35,41 +33,43 @@ function action_status()
     fh:close()
   end
 
-  -- 3) Skan ARP i budowa listy urządzeń
+  -- 3) ARP-scan i zbieranie danych
   local data = {}
   local arp = io.popen("arp-scan --interface=br-lan --localnet 2>/dev/null")
   for line in arp:lines() do
     local ip, mac = line:match("^(%d+%.%d+%.%d+%.%d+)%s+(%S+)")
     if ip and mac then
       mac = string.lower(mac)
-      local hostname = dyn_map[mac] or stat_map[mac] or ""
-      local typ  = "lan"
-      local port
+      local hostname = dyn_map[mac] or stat_map[mac] or "N/A"
+      local typ  = "LAN"
+      local port = "N/A"
 
-      -- a) Wi-Fi (AP only)
-      for ifname in sys.exec("iw dev 2>/dev/null | awk '$1==\"Interface\"{print $2}'")
-                        :gmatch("[^\r\n]+") do
-        local info = sys.exec("iw dev " .. ifname .. " info 2>/dev/null")
-        if info and info:match("type AP") then
+      -- a) Wi-Fi na AP-ifaces
+      local ifs = sys.exec("iw dev 2>/dev/null | awk '$1==\"Interface\"{print $2}'") or ""
+      for ifname in ifs:gmatch("[^\r\n]+") do
+        local info = sys.exec("iw dev " .. ifname .. " info 2>/dev/null") or ""
+        if info:match("type AP") then
           local dump = sys.exec("iw dev " .. ifname .. " station dump 2>/dev/null") or ""
           if dump:lower():match("station " .. mac) then
             local essid = sys.exec(
-              "iwinfo " .. ifname .. " info 2>/dev/null | awk -F'\"' '/ESSID/ {print $2}'"
+              "iwinfo " .. ifname ..
+              " info 2>/dev/null | awk -F'\"' '/ESSID/ {print $2}'"
             ) or ""
-            typ = essid:match("%S+") or typ
+            typ = essid:match("%S+") or "N/A"
             break
           end
         end
       end
 
-      -- b) Port LAN, jeśli dalej lan
-      if typ == "lan" then
-        local tbl = sys.exec("brctl showmacs br-lan 2>/dev/null")
+      -- b) Port LAN
+      if typ == "LAN" then
+        local tbl = sys.exec("brctl showmacs br-lan 2>/dev/null") or ""
         for ln in tbl:gmatch("[^\r\n]+") do
-          local p, m = ln:match("^(%d+)%s+(%S+)")
+          local row = ln:match("^%s*(.*)") or ln
+          local p, m = row:match("^(%d+)%s+(%S+)")
           if m and string.lower(m) == mac then
-            port = tonumber(p)
-            typ  = "lan" .. port
+            port = p
+            typ  = "LAN"
             break
           end
         end
@@ -86,6 +86,6 @@ function action_status()
   end
   arp:close()
 
-  -- 4) Renderujemy szablon z listą urządzeń
+  -- 4) Render
   tpl.render("devices/status", { devices = data })
 end

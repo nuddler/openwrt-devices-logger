@@ -25,6 +25,7 @@
       <th class="text-left">IP</th>
       <th class="text-left">MAC</th>
       <th class="text-left">Hostname</th>
+      <th class="text-left">Port</th>
       <th class="text-left">Typ</th>
     </tr>
     </thead>
@@ -34,6 +35,7 @@
       <td><%=d.ip%></td>
       <td><%=d.mac%></td>
       <td><%=d.hostname%></td>
+      <td><%=d.port%></td>
       <td class="td nowrap" data-title="Typ">
               <span class="ifacebadge <%= d.typ == 'LAN' and 'lan' or 'wifi' %>"
                     data-ifname="<%= d.iface %>"
@@ -44,7 +46,7 @@
                   <% if d.typ == 'LAN' then %>
                     <%= d.port %>
                   <% else %>
-                    <%= d.typ %> <small>(<%= d.iface %>)</small>
+                    <%= d.typ %>
                   <% end %>
                 </span>
         </span>
