@@ -1,24 +1,116 @@
 <%+header%>
-<h2>Urządzenia sieciowe</h2>
-<table class="table">
-<tr><th>IP</th><th>MAC</th><th>Hostname</th><th>Typ</th></tr>
-<%
-  local leases = luci.sys.exec("cat /tmp/dhcp.leases")
-  local neigh  = luci.sys.exec("ip neigh show br-lan")
-  for ip,mac in neigh:gmatch("([^ ]+) dev br%-lan lladdr ([^ ]+)") do
-    local hostname = leases:match(mac .. ".-%s(.-)%s") or "-"
-    local typ = luci.sys.exec(
-      "iw dev wlan0 station dump | grep -iq " .. mac .. " && echo Wi-Fi || echo LAN"
-    )
-    write(
-      "<tr><td>"..ip..
-      "</td><td>"..mac..
-      "</td><td>"..hostname..
-      "</td><td>"..typ..
-      "</td></tr>"
-    )
-  end
-%>
-</table>
-<%+footer%>
 
+<style>
+  .ifacebadge.lan span {
+    background-color: #28a745;
+    color: #fff;
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+
+  .ifacebadge.wifi span {
+    background-color: #17a2b8;
+    color: #fff;
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+</style>
+
+
+<h2>Urządzenia sieciowe</h2>
+<div class="table-responsive">
+  <table id="dev-table" class="table table-hover table-sm m-0">
+    <thead class="thead-light">
+    <tr>
+      <th class="text-left">IP</th>
+      <th class="text-left">MAC</th>
+      <th class="text-left">Hostname</th>
+      <th class="text-left">Typ</th>
+    </tr>
+    </thead>
+    <tbody>
+    <% for _, d in ipairs(devices) do %>
+    <tr>
+      <td><%=d.ip%></td>
+      <td><%=d.mac%></td>
+      <td><%=d.hostname%></td>
+      <td class="td nowrap" data-title="Typ">
+              <span class="ifacebadge <%= d.typ == 'LAN' and 'lan' or 'wifi' %>"
+                    data-ifname="<%= d.iface %>"
+        <% if d.typ ~= 'LAN' then %>data-ssid="<%= d.typ %>"<% end %>>
+        <img src="/luci-static/resources/icons/<%= d.typ == 'LAN' and 'ethernet.png' or 'wifi.png' %>"
+             title="<%= d.typ %>">
+        <span>
+                  <% if d.typ == 'LAN' then %>
+                    <%= d.port %>
+                  <% else %>
+                    <%= d.typ %> <small>(<%= d.iface %>)</small>
+                  <% end %>
+                </span>
+        </span>
+      </td>
+    </tr>
+    <% end %>
+    </tbody>
+  </table>
+</div>
+
+<script type="text/javascript">
+  ;(function () {
+    // Zamieniamy IP na tablicę liczb
+    function ipToArray(ip) {
+      return ip.split('.').map(n => parseInt(n, 10));
+    }
+
+    // Sortowanie tabeli
+    function sortTable(table, col, asc) {
+      const dir = asc ? 1 : -1,
+              tbody = table.tBodies[0],
+              rows = Array.from(tbody.rows);
+
+      rows.sort((a, b) => {
+        if (col === 0) {
+          // kolumna IP: porównanie numeryczne każdego oktetu
+          const A = ipToArray(a.cells[0].textContent.trim()),
+                  B = ipToArray(b.cells[0].textContent.trim());
+          for (let i = 0; i < 4; i++) {
+            if (A[i] !== B[i]) return (A[i] - B[i]) * dir;
+          }
+          return 0;
+        }
+        // pozostałe kolumny: tekstowo
+        const va = a.cells[col].textContent.trim().toLowerCase(),
+                vb = b.cells[col].textContent.trim().toLowerCase();
+        return (va > vb ? 1 : -1) * dir;
+      });
+
+      // Przeładowanie kolejności w DOM
+      rows.forEach(r => tbody.appendChild(r));
+
+      // Odznaczenie wszystkich nagłówków
+      table.querySelectorAll("th")
+              .forEach(th => th.classList.remove("th-sort-asc", "th-sort-desc"));
+
+      // Ustawienie strzałki na aktualnym
+      table.querySelectorAll("th")[col]
+              .classList.add(asc ? "th-sort-asc" : "th-sort-desc");
+    }
+
+    // Podpięcie eventów po załadowaniu
+    document.addEventListener("DOMContentLoaded", function () {
+      const table = document.getElementById("dev-table"),
+              headers = table.tHead.rows[0].cells;
+
+      Array.from(headers).forEach((th, idx) => {
+        let asc = true;
+        th.style.cursor = "pointer";
+        th.addEventListener("click", function () {
+          sortTable(table, idx, asc);
+          asc = !asc;
+        });
+      });
+    });
+  })();
+</script>
+
+<%+footer%>
